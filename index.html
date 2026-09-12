@@ -62,7 +62,7 @@ td{border-top:1px solid #edf1f5;padding:10px 7px;text-align:center;font-size:12p
 tr:hover td{background:#fbfdff}
 .task-title{font-weight:900;color:#173d69;text-align:right;min-width:190px}
 .note{max-width:250px;white-space:pre-wrap;text-align:right;font-size:11px;color:#4a5a6b}
-.pill{display:inline-block;border-radius:99px;padding:5px 9px;font-size:10px;font-weight:900}
+.pill{display:inline-block;border-radius:99px;padding:6px 10px;font-size:10px;font-weight:900}
 .p-assigned{background:#eaf3fe;color:#1761a6}
 .p-progress{background:#fff0d8;color:#9b6500}
 .p-completed{background:#e7f7ed;color:#168349}
@@ -502,22 +502,22 @@ function printPDF(){
   <html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>Prudle - تقرير المهام</title>
   <style>
   *{box-sizing:border-box} body{font-family:Arial,Tahoma,sans-serif;margin:0;color:#17324d;background:#fff}
-  .page{padding:18px}
+  .page{padding:12px}
   .header{display:grid;grid-template-columns:130px 1fr 180px;align-items:center;gap:15px;border-bottom:3px solid #164478;padding-bottom:10px}
   .logo img{width:110px;height:110px;object-fit:contain}
-  .title{text-align:center} .title h1{margin:0;color:#164478;font-size:24px} .title .en{color:#9b1f25;font-weight:bold;font-size:12px}
-  .meta{font-size:10px;line-height:1.8;background:#f4f8fc;border:1px solid #dbe6f2;border-radius:10px;padding:9px}
+  .title{text-align:center;font-weight:700}.title h1{margin:2px 0;color:#164478;font-size:30px;font-weight:900}.title .en{color:#9b1f25;font-weight:900;font-size:15px}.title>div:last-child{font-size:14px;font-weight:800}
+  .meta{font-size:12px;font-weight:800;line-height:1.8;background:#f4f8fc;border:1px solid #dbe6f2;border-radius:10px;padding:9px}
   .summary{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:12px 0}
   .card{border:1px solid #dbe6f2;border-radius:9px;padding:8px;background:#f7faff;text-align:center}
-  .card span{font-size:9px;color:#667a8e} .card b{display:block;font-size:18px;color:#164478}
-  table{width:100%;border-collapse:collapse;font-size:8.2px}
-  th{background:#164478;color:#fff;padding:6px 4px;border:1px solid #d5dfeb;white-space:nowrap}
-  td{padding:6px 4px;border:1px solid #dce5ee;text-align:center;vertical-align:middle}
+  .card span{font-size:12px;color:#667a8e;font-weight:900}.card b{display:block;font-size:22px;font-weight:900;color:#164478}
+  table{width:100%;border-collapse:collapse;font-size:10.8px;font-weight:700}
+  th{background:#164478;color:#fff;padding:8px 5px;border:1px solid #d5dfeb;white-space:nowrap;font-size:11.5px;font-weight:900}
+  td{padding:8px 5px;border:1px solid #dce5ee;text-align:center;vertical-align:middle;font-size:10.8px;font-weight:700;line-height:1.55}
   tbody tr:nth-child(even) td{background:#f8fbfe}
-  .rtl{text-align:right} .sub{font-size:7px;color:#718096}
+  .rtl{text-align:right}.sub{font-size:9px;color:#718096}
   .pdf-pill{
     display:inline-block;
-    min-width:72px;
+    min-width:78px;
     border-radius:999px;
     padding:5px 9px;
     font-weight:900;
@@ -533,9 +533,9 @@ function printPDF(){
   .p-high{background:#fdeaea !important;color:#c73737 !important;border-color:#f1bcbc !important}
   .p-medium{background:#fff4d8 !important;color:#9a6900 !important;border-color:#efd18a !important}
   .p-low{background:#e7f7ed !important;color:#168349 !important;border-color:#b9e5c8 !important}
-  .footer{margin-top:10px;border-top:1px solid #dce5ee;padding-top:7px;font-size:9px;color:#6f7d8b;display:flex;justify-content:space-between}
+  .footer{margin-top:10px;border-top:1px solid #dce5ee;padding-top:7px;font-size:11px;font-weight:800;color:#6f7d8b;display:flex;justify-content:space-between}
   .print{margin-top:12px;border:0;border-radius:8px;background:#164478;color:#fff;padding:9px 18px;font-weight:bold;cursor:pointer}
-  @page{size:A4 landscape;margin:8mm}
+  @page{size:A4 landscape;margin:5mm}
   @media print{*{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}.print{display:none}.page{padding:0}tr{break-inside:avoid}}
   </style></head><body><div class="page">
     <div class="header">
