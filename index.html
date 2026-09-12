@@ -90,6 +90,32 @@ tr:hover td{background:#fbfdff}
 .titem{margin:0 0 12px}
 .titem b{display:block;color:#164478;font-size:12px}
 .titem span{font-size:11px;color:#6a7b8e}
+
+.multi-task-box{
+  margin-top:12px;
+  border:2px solid #dce6f1;
+  border-radius:16px;
+  padding:14px;
+  background:#f9fbfe;
+  position:relative;
+}
+.multi-task-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:10px;
+}
+.multi-task-head strong{
+  color:#164478;
+  font-size:14px;
+}
+.remove-task-row{
+  background:#c73737;
+  padding:7px 10px;
+  font-size:11px;
+}
+
 @media(max-width:900px){
   .page{width:100%;padding:0 0 25px}
   .hero{border-radius:0;padding:16px}
@@ -191,38 +217,22 @@ tr:hover td{background:#fbfdff}
     </div>
 
     <div class="grid">
-      <div class="field">
+      <div class="field full">
         <label>اسم الموظف *</label>
         <input id="employeeName" placeholder="مثال: أحمد محمد">
       </div>
-      <div class="field full">
-        <label>عنوان المهمة *</label>
-        <input id="taskTitle" placeholder="مثال: متابعة تقارير الحضور">
-      </div>
-      <div class="field full">
-        <label>تفاصيل المهمة</label>
-        <textarea id="taskDetails" placeholder="اكتب وصف المهمة المطلوب تنفيذها..."></textarea>
-      </div>
-      <div class="field">
-        <label>الأولوية</label>
-        <select id="priority">
-          <option value="medium">متوسطة</option>
-          <option value="high">عالية</option>
-          <option value="low">منخفضة</option>
-        </select>
-      </div>
-      <div class="field">
-        <label>تاريخ الاستحقاق</label>
-        <input id="dueDate" type="date">
-      </div>
-      <div class="field full">
-        <label>ملاحظة الإدارة للموظف</label>
-        <textarea id="adminNote" placeholder="ملاحظة أو تعليمات إضافية للموظف..."></textarea>
-      </div>
     </div>
 
-    <div class="modal-buttons">
-      <button id="saveTask" class="btn-green"><i class="fa-solid fa-floppy-disk"></i> حفظ المهمة</button>
+    <div id="multiTaskArea"></div>
+
+    <div style="margin-top:14px">
+      <button type="button" id="addAnotherTask" class="btn-soft" style="width:100%;font-size:14px;padding:12px">
+        <i class="fa-solid fa-plus"></i> إسناد مهمة إضافية
+      </button>
+    </div>
+
+    <div class="modal-buttons" id="multiTaskButtons">
+      <button id="saveTask" class="btn-green"><i class="fa-solid fa-floppy-disk"></i> حفظ المهام</button>
       <button id="cancelTask" class="btn-gray">إلغاء</button>
     </div>
   </div>
@@ -294,60 +304,161 @@ function isOverdue(t){
   return end < new Date();
 }
 
+function taskRowHtml(task={}, index=0, removable=true){
+  const title = esc(task.title || "");
+  const details = esc(task.details || "");
+  const priority = task.priority || "medium";
+  const dueDate = esc(task.dueDate || "");
+  const adminNote = esc(task.adminNote || "");
+
+  return `
+    <div class="multi-task-box" data-task-row>
+      <div class="multi-task-head">
+        <strong>المهمة ${index + 1}</strong>
+        ${removable ? `<button type="button" class="remove-task-row"><i class="fa-solid fa-trash"></i> حذف المهمة</button>` : ""}
+      </div>
+      <div class="grid">
+        <div class="field full">
+          <label>عنوان المهمة *</label>
+          <input class="mt-title" value="${title}" placeholder="مثال: متابعة تقارير الحضور">
+        </div>
+        <div class="field full">
+          <label>تفاصيل المهمة</label>
+          <textarea class="mt-details" placeholder="اكتب وصف المهمة المطلوب تنفيذها...">${details}</textarea>
+        </div>
+        <div class="field">
+          <label>الأولوية</label>
+          <select class="mt-priority">
+            <option value="medium" ${priority==="medium"?"selected":""}>متوسطة</option>
+            <option value="high" ${priority==="high"?"selected":""}>عالية</option>
+            <option value="low" ${priority==="low"?"selected":""}>منخفضة</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>تاريخ الاستحقاق</label>
+          <input class="mt-dueDate" type="date" value="${dueDate}">
+        </div>
+        <div class="field full">
+          <label>ملاحظة الإدارة للموظف</label>
+          <textarea class="mt-adminNote" placeholder="ملاحظة أو تعليمات إضافية للموظف...">${adminNote}</textarea>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function refreshTaskRowNumbers(){
+  const rows=[...document.querySelectorAll("[data-task-row]")];
+  rows.forEach((row,i)=>{
+    const title=row.querySelector(".multi-task-head strong");
+    if(title) title.textContent=`المهمة ${i+1}`;
+    const del=row.querySelector(".remove-task-row");
+    if(del) del.style.display = rows.length > 1 && !editingId ? "" : "none";
+  });
+}
+
+function bindTaskRowButtons(){
+  document.querySelectorAll(".remove-task-row").forEach(btn=>{
+    btn.onclick=()=>{
+      btn.closest("[data-task-row]")?.remove();
+      refreshTaskRowNumbers();
+    };
+  });
+}
+
+function addTaskRow(task={}){
+  const area=$("multiTaskArea");
+  const index=area.querySelectorAll("[data-task-row]").length;
+  area.insertAdjacentHTML("beforeend",taskRowHtml(task,index,true));
+  bindTaskRowButtons();
+  refreshTaskRowNumbers();
+}
+
 function openTaskModal(task=null){
   editingId = task?.id || "";
-  $("modalTitle").textContent = editingId ? "تعديل المهمة" : "إسناد مهمة جديدة";
+  $("modalTitle").textContent = editingId ? "تعديل المهمة" : "إسناد أكثر من مهمة";
   $("employeeName").value = task?.employeeName || "";
-  $("taskTitle").value = task?.title || "";
-  $("taskDetails").value = task?.details || "";
-  $("priority").value = task?.priority || "medium";
-  $("dueDate").value = task?.dueDate || "";
-  $("adminNote").value = task?.adminNote || "";
+  $("multiTaskArea").innerHTML = "";
+  $("addAnotherTask").style.display = editingId ? "none" : "";
+  $("saveTask").innerHTML = editingId
+    ? '<i class="fa-solid fa-floppy-disk"></i> حفظ التعديل'
+    : '<i class="fa-solid fa-floppy-disk"></i> حفظ المهام';
+
+  addTaskRow(task || {});
   $("taskModal").classList.add("show");
 }
+
 function closeTaskModal(){
   $("taskModal").classList.remove("show");
+  $("multiTaskArea").innerHTML="";
   editingId="";
 }
+
 $("addTask").onclick=()=>openTaskModal();
+$("addAnotherTask").onclick=()=>addTaskRow({});
 $("closeModal").onclick=closeTaskModal;
 $("cancelTask").onclick=closeTaskModal;
 $("taskModal").onclick=e=>{if(e.target===$("taskModal"))closeTaskModal();};
 
 $("saveTask").onclick=async()=>{
   const employeeName=txt($("employeeName").value);
-  const title=txt($("taskTitle").value);
   if(!employeeName) return alert("اكتب اسم الموظف.");
-  if(!title) return alert("اكتب عنوان المهمة.");
 
-  const data={
-    employeeName,
-    title,
-    details:txt($("taskDetails").value),
-    priority:$("priority").value,
-    dueDate:$("dueDate").value,
-    adminNote:txt($("adminNote").value),
-    updatedAt:firebase.firestore.FieldValue.serverTimestamp()
-  };
+  const rows=[...document.querySelectorAll("[data-task-row]")];
+  if(!rows.length) return alert("أضف مهمة واحدة على الأقل.");
+
+  const payloads=rows.map((row,i)=>({
+    index:i+1,
+    title:txt(row.querySelector(".mt-title")?.value),
+    details:txt(row.querySelector(".mt-details")?.value),
+    priority:row.querySelector(".mt-priority")?.value || "medium",
+    dueDate:row.querySelector(".mt-dueDate")?.value || "",
+    adminNote:txt(row.querySelector(".mt-adminNote")?.value)
+  }));
+
+  const missing=payloads.find(x=>!x.title);
+  if(missing) return alert(`اكتب عنوان المهمة رقم ${missing.index}.`);
 
   try{
     $("saveTask").disabled=true;
+
     if(editingId){
-      await db.collection(TASKS).doc(editingId).set(data,{merge:true});
+      const p=payloads[0];
+      await db.collection(TASKS).doc(editingId).set({
+        employeeName,
+        title:p.title,
+        details:p.details,
+        priority:p.priority,
+        dueDate:p.dueDate,
+        adminNote:p.adminNote,
+        updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+      },{merge:true});
     }else{
-      await db.collection(TASKS).add({
-        ...data,
-        status:"assigned",
-        employeeNote:"",
-        createdAt:firebase.firestore.FieldValue.serverTimestamp(),
-        receivedAt:null,
-        completedAt:null
+      const batch=db.batch();
+      payloads.forEach(p=>{
+        const ref=db.collection(TASKS).doc();
+        batch.set(ref,{
+          employeeName,
+          title:p.title,
+          details:p.details,
+          priority:p.priority,
+          dueDate:p.dueDate,
+          adminNote:p.adminNote,
+          status:"assigned",
+          employeeNote:"",
+          createdAt:firebase.firestore.FieldValue.serverTimestamp(),
+          updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
+          receivedAt:null,
+          completedAt:null
+        });
       });
+      await batch.commit();
     }
+
     closeTaskModal();
   }catch(e){
     console.error(e);
-    alert("تعذر حفظ المهمة. راجع صلاحيات Firestore.");
+    alert("تعذر حفظ المهام. راجع صلاحيات Firestore.");
   }finally{
     $("saveTask").disabled=false;
   }
