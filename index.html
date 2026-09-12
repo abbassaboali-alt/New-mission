@@ -125,7 +125,7 @@ tr:hover td{background:#fbfdff}
   </section>
 
   <section class="filters">
-    <input id="search" placeholder="بحث باسم الموظف، رقمه، عنوان المهمة...">
+    <input id="search" placeholder="بحث باسم الموظف أو عنوان المهمة...">
     <select id="employeeFilter"><option value="">كل الموظفين</option></select>
     <select id="statusFilter">
       <option value="">كل الحالات</option>
@@ -163,8 +163,7 @@ tr:hover td{background:#fbfdff}
           <tr>
             <th>#</th>
             <th>الموظف</th>
-            <th>رقم الموظف</th>
-            <th>المهمة</th>
+                        <th>المهمة</th>
             <th>الأولوية</th>
             <th>الحالة</th>
             <th>ملاحظة الإدارة</th>
@@ -177,7 +176,7 @@ tr:hover td{background:#fbfdff}
           </tr>
         </thead>
         <tbody id="tbody">
-          <tr><td colspan="13" class="empty">جاري تحميل المهام...</td></tr>
+          <tr><td colspan="12" class="empty">جاري تحميل المهام...</td></tr>
         </tbody>
       </table>
     </div>
@@ -195,10 +194,6 @@ tr:hover td{background:#fbfdff}
       <div class="field">
         <label>اسم الموظف *</label>
         <input id="employeeName" placeholder="مثال: أحمد محمد">
-      </div>
-      <div class="field">
-        <label>رقم / كود الموظف *</label>
-        <input id="employeeCode" placeholder="مثال: EMP001">
       </div>
       <div class="field full">
         <label>عنوان المهمة *</label>
@@ -303,7 +298,6 @@ function openTaskModal(task=null){
   editingId = task?.id || "";
   $("modalTitle").textContent = editingId ? "تعديل المهمة" : "إسناد مهمة جديدة";
   $("employeeName").value = task?.employeeName || "";
-  $("employeeCode").value = task?.employeeCode || "";
   $("taskTitle").value = task?.title || "";
   $("taskDetails").value = task?.details || "";
   $("priority").value = task?.priority || "medium";
@@ -322,15 +316,12 @@ $("taskModal").onclick=e=>{if(e.target===$("taskModal"))closeTaskModal();};
 
 $("saveTask").onclick=async()=>{
   const employeeName=txt($("employeeName").value);
-  const employeeCode=txt($("employeeCode").value);
   const title=txt($("taskTitle").value);
   if(!employeeName) return alert("اكتب اسم الموظف.");
-  if(!employeeCode) return alert("اكتب رقم / كود الموظف.");
   if(!title) return alert("اكتب عنوان المهمة.");
 
   const data={
     employeeName,
-    employeeCode,
     title,
     details:txt($("taskDetails").value),
     priority:$("priority").value,
@@ -370,12 +361,12 @@ function filtered(){
   const dd=$("dateFilter").value;
 
   return tasks.filter(t=>{
-    if(emp && t.employeeCode!==emp) return false;
+    if(emp && t.employeeName!==emp) return false;
     if(st && t.status!==st) return false;
     if(pr && t.priority!==pr) return false;
     if(dd && t.dueDate!==dd) return false;
     if(q){
-      const hay=[t.employeeName,t.employeeCode,t.title,t.details,t.adminNote,t.employeeNote].join(" ").toLowerCase();
+      const hay=[t.employeeName,t.title,t.details,t.adminNote,t.employeeNote].join(" ").toLowerCase();
       if(!hay.includes(q)) return false;
     }
     return true;
@@ -385,10 +376,13 @@ function filtered(){
 function fillEmployees(){
   const keep=$("employeeFilter").value;
   const map=new Map();
-  tasks.forEach(t=>{ if(t.employeeCode) map.set(t.employeeCode,t.employeeName||t.employeeCode); });
+  tasks.forEach(t=>{
+    const name=txt(t.employeeName);
+    if(name) map.set(name,name);
+  });
   $("employeeFilter").innerHTML='<option value="">كل الموظفين</option>';
-  [...map.entries()].sort((a,b)=>a[1].localeCompare(b[1],"ar")).forEach(([code,name])=>{
-    $("employeeFilter").add(new Option(name+" — "+code,code));
+  [...map.keys()].sort((a,b)=>a.localeCompare(b,"ar")).forEach(name=>{
+    $("employeeFilter").add(new Option(name,name));
   });
   if(map.has(keep)) $("employeeFilter").value=keep;
 }
@@ -405,7 +399,7 @@ function render(){
   $("statusText").textContent=list.length+" مهمة معروضة";
 
   if(!list.length){
-    $("tbody").innerHTML='<tr><td colspan="13" class="empty">لا توجد مهام مطابقة.</td></tr>';
+    $("tbody").innerHTML='<tr><td colspan="12" class="empty">لا توجد مهام مطابقة.</td></tr>';
     return;
   }
 
@@ -413,8 +407,7 @@ function render(){
     <tr>
       <td>${i+1}</td>
       <td><b>${esc(t.employeeName||"—")}</b></td>
-      <td>${esc(t.employeeCode||"—")}</td>
-      <td class="task-title">${esc(t.title||"—")} ${isOverdue(t)?'<div class="small" style="color:#c73737">متأخرة</div>':""}</td>
+            <td class="task-title">${esc(t.title||"—")} ${isOverdue(t)?'<div class="small" style="color:#c73737">متأخرة</div>':""}</td>
       <td><span class="pill ${priorityClass(t.priority)}">${priorityLabel(t.priority)}</span></td>
       <td><span class="pill ${statusClass(t.status)}">${statusLabel(t.status)}</span></td>
       <td class="note">${esc(t.adminNote||"—")}</td>
@@ -441,7 +434,6 @@ function openView(t){
   $("viewContent").innerHTML=`
     <div class="grid">
       <div class="field"><label>الموظف</label><div>${esc(t.employeeName||"—")}</div></div>
-      <div class="field"><label>كود الموظف</label><div>${esc(t.employeeCode||"—")}</div></div>
       <div class="field full"><label>عنوان المهمة</label><div><b>${esc(t.title||"—")}</b></div></div>
       <div class="field full"><label>التفاصيل</label><div class="note" style="max-width:none">${esc(t.details||"—")}</div></div>
       <div class="field full"><label>ملاحظة الإدارة</label><div class="note" style="max-width:none">${esc(t.adminNote||"—")}</div></div>
@@ -492,7 +484,7 @@ function printPDF(){
   const rows=list.map((t,i)=>`
     <tr>
       <td>${i+1}</td>
-      <td>${esc(t.employeeName||"—")}<div class="sub">${esc(t.employeeCode||"—")}</div></td>
+      <td>${esc(t.employeeName||"—")}</td>
       <td class="rtl">${esc(t.title||"—")}</td>
       <td>${priorityLabel(t.priority)}</td>
       <td>${statusLabel(t.status)}</td>
@@ -563,7 +555,7 @@ db.collection(TASKS).orderBy("createdAt","desc").onSnapshot(snap=>{
   },e=>{
     console.error(e);
     $("statusText").textContent="تعذر تحميل البيانات";
-    $("tbody").innerHTML='<tr><td colspan="13" class="empty">تعذر الاتصال بقاعدة البيانات.</td></tr>';
+    $("tbody").innerHTML='<tr><td colspan="12" class="empty">تعذر الاتصال بقاعدة البيانات.</td></tr>';
   });
 });
 </script>
