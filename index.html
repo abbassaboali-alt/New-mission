@@ -314,14 +314,68 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const TASKS = "EmployeeTasks";
 
+let PRUDLE_CURRENT_USER = "";
+
+window.addEventListener("message", function(e){
+
+  if(e.origin !== "https://www.prudle-education.com"){
+    return;
+  }
+
+  if(
+    e.data &&
+    e.data.type === "PRUDLE_USER_INFO"
+  ){
+
+    PRUDLE_CURRENT_USER = String(
+      e.data.assignedBy ||
+      e.data.username ||
+      ""
+    ).trim();
+
+    if(PRUDLE_CURRENT_USER){
+      sessionStorage.setItem(
+        "prudleCurrentUser",
+        PRUDLE_CURRENT_USER
+      );
+    }
+
+    console.log(
+      "PRUDLE current assigner:",
+      PRUDLE_CURRENT_USER
+    );
+  }
+});
+
+
 function getCurrentAssigner(){
+
   return String(
+    PRUDLE_CURRENT_USER ||
+    sessionStorage.getItem("prudleCurrentUser") ||
     localStorage.getItem("username") ||
     localStorage.getItem("userName") ||
     localStorage.getItem("name") ||
     ""
   ).trim() || "غير معروف";
 }
+
+
+/* نطلب اسم المستخدم من الصفحة الرئيسية */
+try{
+
+  if(window.parent !== window){
+
+    window.parent.postMessage(
+      {
+        type:"PRUDLE_REQUEST_USER_INFO"
+      },
+      "https://www.prudle-education.com"
+    );
+
+  }
+
+}catch(e){}
 const $ = id => document.getElementById(id);
 
 let tasks = [];
