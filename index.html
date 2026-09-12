@@ -493,16 +493,58 @@ function addTaskRow(task={}){
 }
 
 function openTaskModal(task=null){
+
+  /* إذا كانت عملية تعديل */
+  if(task && task.id){
+
+    const currentUser = String(
+      getCurrentAssigner() || ""
+    ).trim().toLowerCase();
+
+    const taskOwner = String(
+      task.assignedBy || ""
+    ).trim().toLowerCase();
+
+    if(
+      !currentUser ||
+      !taskOwner ||
+      currentUser === "غير معروف" ||
+      taskOwner === "غير معروف" ||
+      currentUser !== taskOwner
+    ){
+      alert(
+        "لا يمكنك تعديل هذه المهمة.\n\n" +
+        "يمكن تعديل المهمة فقط بواسطة الشخص الذي قام بإسنادها.\n\n" +
+        "المُسند بواسطة: " +
+        (task.assignedBy || "غير مسجل")
+      );
+
+      return;
+    }
+  }
+
   editingId = task?.id || "";
-  $("modalTitle").textContent = editingId ? "تعديل المهمة" : "إسناد أكثر من مهمة";
-  $("employeeName").value = task?.employeeName || "";
+
+  $("modalTitle").textContent =
+    editingId
+      ? "تعديل المهمة"
+      : "إسناد أكثر من مهمة";
+
+  $("employeeName").value =
+    task?.employeeName || "";
+
   $("multiTaskArea").innerHTML = "";
-  $("addAnotherTask").style.display = editingId ? "none" : "";
-  $("saveTask").innerHTML = editingId
-    ? '<i class="fa-solid fa-floppy-disk"></i> حفظ التعديل'
-    : '<i class="fa-solid fa-floppy-disk"></i> حفظ المهام';
+
+  $("addAnotherTask").style.display =
+    editingId ? "none" : "";
+
+  $("saveTask").innerHTML =
+    editingId
+      ? '<i class="fa-solid fa-floppy-disk"></i> حفظ التعديل'
+      : '<i class="fa-solid fa-floppy-disk"></i> حفظ المهام';
 
   addTaskRow(task || {});
+
   $("taskModal").classList.add("show");
 }
 
@@ -699,7 +741,22 @@ function render(){
       <td>${dateTime(t.completedAt)}</td>
       <td class="actions-cell">
         <button class="btn-soft viewBtn" data-id="${t.id}">عرض</button>
-        <button class="editBtn" data-id="${t.id}">تعديل</button>
+        ${
+  String(t.assignedBy || "")
+    .trim()
+    .toLowerCase()
+  ===
+  String(getCurrentAssigner() || "")
+    .trim()
+    .toLowerCase()
+
+  ? `<button
+       class="editBtn"
+       data-id="${t.id}">
+       تعديل
+     </button>`
+  : ``
+}
         ${
   String(t.assignedBy || "")
     .trim()
