@@ -462,7 +462,7 @@ function isAssignablePrudleUser(user){
   const roles=normalizeUserRoles(user);
 
   return roles.some(role=>
-    ["trainer","assistant","admin","general_manager"].includes(role)
+    ["assistant","admin","general_manager"].includes(role)
   );
 }
 
