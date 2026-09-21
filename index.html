@@ -709,6 +709,8 @@ $("saveTask").onclick=async()=>{
         const ref=db.collection(TASKS).doc();
         batch.set(ref,{
           employeeName,
+          employeeUsername:employeeUsername || "",
+          employeeUserId:employeeUserId || "",
           assignedBy:getCurrentAssigner(),
           title:p.title,
           details:p.details,
