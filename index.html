@@ -315,7 +315,6 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const TASKS = "EmployeeTasks";
 const USERS_COLLECTION = "USERS";
-const TRAINERS_COLLECTION = "Trainers";
 
 let PRUDLE_CURRENT_USER = "";
 
@@ -383,7 +382,6 @@ const $ = id => document.getElementById(id);
 
 let tasks = [];
 let prudleUsers = [];
-let prudleTrainers = [];
 let editingId = "";
 const selectedIds = new Set();
 
@@ -428,91 +426,103 @@ function isOverdue(t){
 }
 
 
+function normalizeUserRoles(user){
+  const roles=[];
+
+  if(Array.isArray(user?.roles)){
+    user.roles.forEach(role=>{
+      const r=txt(role).trim().toLowerCase();
+      if(r && !roles.includes(r)) roles.push(r);
+    });
+  }
+
+  const oldRole=txt(user?.role).trim().toLowerCase();
+  if(oldRole && !roles.includes(oldRole)) roles.push(oldRole);
+
+  return roles;
+}
+
 function userTaskDisplayName(user){
   return txt(
     user?.taskDisplayName ||
     user?.fullName ||
-    user?.displayName ||
     user?.trainerName ||
-    user?.name ||
-    user?.arabicName ||
-    user?.englishName ||
+    user?.displayName ||
     user?.username ||
     ""
   );
 }
 
-function allAssignablePeople(){
-  const merged=[...prudleUsers,...prudleTrainers];
-  const seen=new Set();
+/*
+  الإسناد يقرأ من USERS فقط حسب كود الصلاحيات.
+  يظهر كل مستخدم لديه:
+  مدرب / مساعد / مدير / مدير عام
+*/
+function isAssignablePrudleUser(user){
+  const roles=normalizeUserRoles(user);
 
-  return merged.filter(person=>{
-    const name=userTaskDisplayName(person);
-    const username=txt(person?.username);
-    const key=(username || name).toLowerCase();
-
-    if(!name || !key || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  return roles.some(role=>
+    ["trainer","assistant","admin","general_manager"].includes(role)
+  );
 }
 
 function renderPrudleEmployeesList(){
   const list=$("prudleEmployeesList");
   if(!list) return;
 
-  list.innerHTML=allAssignablePeople().map(person=>{
-    const name=userTaskDisplayName(person);
-    const username=txt(person.username);
-    const source=person.__source==="trainer" ? "مدرب" : "";
-    const label=[source,username ? "@"+username : ""].filter(Boolean).join(" · ");
+  const seen=new Set();
 
-    return `<option value="${esc(name)}" label="${esc(label)}"></option>`;
-  }).join("");
+  list.innerHTML=prudleUsers
+    .filter(isAssignablePrudleUser)
+    .map(user=>{
+      const name=userTaskDisplayName(user);
+      const username=txt(user.username);
+      const key=(username || name).toLowerCase();
+
+      if(!name || !key || seen.has(key)) return "";
+      seen.add(key);
+
+      const roleNames=normalizeUserRoles(user).map(role=>{
+        if(role==="trainer") return "مدرب";
+        if(role==="assistant") return "مساعد";
+        if(role==="admin") return "مدير";
+        if(role==="general_manager") return "مدير عام";
+        return role;
+      }).join(" + ");
+
+      return `<option value="${esc(name)}" label="${esc([roleNames,username ? "@"+username : ""].filter(Boolean).join(" · "))}"></option>`;
+    })
+    .join("");
 }
 
 function findPrudleUserByEmployeeName(name){
   const wanted=txt(name).toLowerCase();
   if(!wanted) return null;
 
-  return allAssignablePeople().find(user=>
-    [
-      userTaskDisplayName(user),
-      user.fullName,
-      user.displayName,
-      user.trainerName,
-      user.name,
-      user.arabicName,
-      user.englishName,
-      user.username
-    ].some(v=>txt(v).toLowerCase()===wanted)
-  ) || null;
+  return prudleUsers
+    .filter(isAssignablePrudleUser)
+    .find(user=>
+      [
+        userTaskDisplayName(user),
+        user.fullName,
+        user.trainerName,
+        user.displayName,
+        user.username
+      ].some(v=>txt(v).toLowerCase()===wanted)
+    ) || null;
 }
 
-/* المستخدمون الإداريون والمساعدون وغيرهم */
+/* نفس مجموعة USERS الموجودة في كود الصلاحيات */
 db.collection(USERS_COLLECTION).onSnapshot(
   snap=>{
     prudleUsers=snap.docs.map(doc=>({
       id:doc.id,
-      ...(doc.data()||{}),
-      __source:"user"
+      ...(doc.data()||{})
     }));
+
     renderPrudleEmployeesList();
   },
   error=>console.warn("USERS load error:",error)
-);
-
-/* المدربون: إضافتهم لقائمة إسناد المهام أيضاً */
-db.collection(TRAINERS_COLLECTION).onSnapshot(
-  snap=>{
-    prudleTrainers=snap.docs.map(doc=>({
-      id:doc.id,
-      ...(doc.data()||{}),
-      __source:"trainer"
-    }));
-    renderPrudleEmployeesList();
-  },
-  error=>console.warn("Trainers load error:",error)
 );
 
 function taskRowHtml(task={}, index=0, removable=true){
