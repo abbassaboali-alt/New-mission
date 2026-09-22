@@ -317,6 +317,8 @@ const TASKS = "EmployeeTasks";
 const USERS_COLLECTION = "USERS";
 
 let PRUDLE_CURRENT_USER = "";
+let PRUDLE_CURRENT_ROLES = [];
+let ALL_TASKS = [];
 
 window.addEventListener("message", function(e){
 
@@ -342,10 +344,26 @@ window.addEventListener("message", function(e){
       );
     }
 
+    const incomingRoles = Array.isArray(e.data.roles)
+      ? e.data.roles
+      : [e.data.role || e.data.userRole || ""];
+
+    PRUDLE_CURRENT_ROLES = incomingRoles
+      .map(r=>String(r || "").trim().toLowerCase())
+      .filter(Boolean);
+
+    sessionStorage.setItem(
+      "prudleCurrentRoles",
+      JSON.stringify(PRUDLE_CURRENT_ROLES)
+    );
+
     console.log(
       "PRUDLE current assigner:",
-      PRUDLE_CURRENT_USER
+      PRUDLE_CURRENT_USER,
+      PRUDLE_CURRENT_ROLES
     );
+
+    refreshTaskVisibility();
   }
 });
 
@@ -362,6 +380,134 @@ function getCurrentAssigner(){
   ).trim() || "غير معروف";
 }
 
+
+
+/* =====================================================
+   TASK VISIBILITY
+   مدير عام فقط: يرى جميع المهام
+   أي صلاحية أخرى: يرى المهام المسندة إليه فقط
+===================================================== */
+
+function normalizeKey(v){
+  return String(v == null ? "" : v).trim().toLowerCase();
+}
+
+function currentUsername(){
+  return normalizeKey(
+    PRUDLE_CURRENT_USER ||
+    sessionStorage.getItem("prudleCurrentUser") ||
+    localStorage.getItem("username") ||
+    localStorage.getItem("userName") ||
+    ""
+  );
+}
+
+function getCurrentRoles(){
+  let roles = [];
+
+  if(Array.isArray(PRUDLE_CURRENT_ROLES)){
+    roles.push(...PRUDLE_CURRENT_ROLES);
+  }
+
+  try{
+    const r = JSON.parse(sessionStorage.getItem("prudleCurrentRoles") || "[]");
+    if(Array.isArray(r)) roles.push(...r);
+  }catch(e){}
+
+  try{
+    const r = JSON.parse(localStorage.getItem("roles") || "[]");
+    if(Array.isArray(r)) roles.push(...r);
+  }catch(e){}
+
+  roles.push(
+    localStorage.getItem("role") || "",
+    localStorage.getItem("userRole") || ""
+  );
+
+  /* لأن iframe له تخزين منفصل، نقرأ صلاحية المستخدم من USERS أيضاً */
+  const username = currentUsername();
+  if(username && Array.isArray(prudleUsers)){
+    const me = prudleUsers.find(u =>
+      [u.id,u.uid,u.username,u.userName,u.usernameLower,u.email]
+        .some(v=>normalizeKey(v) === username)
+    );
+
+    if(me){
+      if(Array.isArray(me.roles)) roles.push(...me.roles);
+      roles.push(me.role || "", me.userRole || "");
+    }
+  }
+
+  return [...new Set(roles.map(normalizeKey).filter(Boolean))];
+}
+
+function isGeneralManager(){
+  const roles = getCurrentRoles();
+  return roles.includes("general_manager") ||
+         roles.includes("general manager") ||
+         roles.includes("مدير عام");
+}
+
+function canSeeTask(task){
+  if(isGeneralManager()) return true;
+
+  const username = currentUsername();
+  if(!username) return false;
+
+  const myUser = Array.isArray(prudleUsers)
+    ? prudleUsers.find(u =>
+        [u.id,u.uid,u.username,u.userName,u.usernameLower,u.email]
+          .some(v=>normalizeKey(v) === username)
+      )
+    : null;
+
+  const myKeys = new Set([
+    username,
+    myUser?.id,
+    myUser?.uid,
+    myUser?.username,
+    myUser?.userName,
+    myUser?.usernameLower,
+    myUser?.email,
+    myUser?.employeeName,
+    myUser?.displayName,
+    myUser?.fullName,
+    myUser?.name,
+    myUser?.trainerName
+  ].map(normalizeKey).filter(Boolean));
+
+  const taskKeys = [
+    task?.employeeUsername,
+    task?.employeeUserId,
+    task?.employeeName,
+    task?.assignedEmployeeUsername,
+    task?.assignedEmployeeName,
+    task?.assigneeUsername,
+    task?.assigneeName,
+    task?.assignedToUsername,
+    task?.assignedToName,
+    task?.receiverUsername,
+    task?.receiverName,
+    task?.recipientUsername,
+    task?.recipientName,
+    task?.assignedTo,
+    task?.assignee,
+    task?.receiver,
+    task?.recipient,
+    task?.toUser,
+    task?.toUsername,
+    task?.username,
+    task?.userName
+  ].map(normalizeKey).filter(Boolean);
+
+  return taskKeys.some(k=>myKeys.has(k));
+}
+
+function refreshTaskVisibility(){
+  if(!Array.isArray(ALL_TASKS)) return;
+  tasks = ALL_TASKS.filter(canSeeTask);
+  if(typeof render === "function") render();
+}
 
 /* نطلب اسم المستخدم من الصفحة الرئيسية */
 try{
@@ -521,6 +667,7 @@ db.collection(USERS_COLLECTION).onSnapshot(
     }));
 
     renderPrudleEmployeesList();
+    refreshTaskVisibility();
   },
   error=>console.warn("USERS load error:",error)
 );
@@ -1162,14 +1309,15 @@ function printPDF(){
 $("pdfBtn").onclick=printPDF;
 
 db.collection(TASKS).orderBy("createdAt","desc").onSnapshot(snap=>{
-  tasks=snap.docs.map(d=>({id:d.id,...d.data()}));
-  render();
+  ALL_TASKS=snap.docs.map(d=>({id:d.id,...d.data()}));
+  refreshTaskVisibility();
 },err=>{
   console.error(err);
   // fallback if orderBy needs an index or older docs have no createdAt
   db.collection(TASKS).onSnapshot(snap=>{
-    tasks=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(toDate(b.createdAt)?.getTime()||0)-(toDate(a.createdAt)?.getTime()||0));
-    render();
+    ALL_TASKS=snap.docs.map(d=>({id:d.id,...d.data()}))
+      .sort((a,b)=>(toDate(b.createdAt)?.getTime()||0)-(toDate(a.createdAt)?.getTime()||0));
+    refreshTaskVisibility();
   },e=>{
     console.error(e);
     $("statusText").textContent="تعذر تحميل البيانات";
