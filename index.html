@@ -1039,6 +1039,88 @@ $("saveTask").onclick=async()=>{
   }
 };
 
+
+/* ===== دمج المهام المتطابقة القديمة والجديدة في صف واحد ===== */
+function normalizedSharedAssignees(task){
+  if(Array.isArray(task?.assignees) && task.assignees.length){
+    return task.assignees.map(a=>({
+      name:txt(a?.name || a?.employeeName),
+      username:txt(a?.username || a?.employeeUsername),
+      id:txt(a?.id || a?.employeeUserId)
+    })).filter(a=>a.name || a.username || a.id);
+  }
+  return [{
+    name:txt(task?.employeeName),
+    username:txt(task?.employeeUsername),
+    id:txt(task?.employeeUserId)
+  }].filter(a=>a.name || a.username || a.id);
+}
+
+function taskGroupKey(t){
+  /* لا نستخدم الموظف في المفتاح: نفس المهمة المسندة لنفس الوقت/المحتوى = صف واحد */
+  const created=toDate(t?.createdAt);
+  const minute=created ? Math.floor(created.getTime()/60000) : "";
+  return [
+    txt(t?.assignedBy).toLowerCase(),
+    txt(t?.title).toLowerCase(),
+    txt(t?.details).toLowerCase(),
+    txt(t?.priority).toLowerCase(),
+    txt(t?.dueDate),
+    txt(t?.adminNote).toLowerCase(),
+    minute
+  ].join("||");
+}
+
+function mergeDuplicateTaskRows(list){
+  const groups=new Map();
+
+  (list||[]).forEach(t=>{
+    /* المهام الجديدة الموحدة تبقى كما هي */
+    const key=Array.isArray(t.assignees) && t.assignees.length
+      ? "doc::"+t.id
+      : taskGroupKey(t);
+
+    if(!groups.has(key)){
+      groups.set(key,{
+        ...t,
+        _sourceIds:[t.id],
+        assignees:normalizedSharedAssignees(t)
+      });
+      return;
+    }
+
+    const g=groups.get(key);
+    g._sourceIds.push(t.id);
+
+    const seen=new Set(g.assignees.map(a=>
+      txt(a.username || a.id || a.name).toLowerCase()
+    ));
+    normalizedSharedAssignees(t).forEach(a=>{
+      const k=txt(a.username || a.id || a.name).toLowerCase();
+      if(k && !seen.has(k)){
+        seen.add(k);
+        g.assignees.push(a);
+      }
+    });
+
+    /* إذا اختلفت حالات النسخ القديمة، نعرض الحالة الأكثر تقدماً */
+    const rank={assigned:1,in_progress:2,completed:3,cancelled:0};
+    if((rank[t.status]||0) > (rank[g.status]||0)) g.status=t.status;
+
+    if(!g.receivedAt && t.receivedAt) g.receivedAt=t.receivedAt;
+    if(!g.completedAt && t.completedAt) g.completedAt=t.completedAt;
+  });
+
+  return [...groups.values()];
+}
+
+function mergedAssigneeNames(t){
+  const names=normalizedSharedAssignees(t)
+    .map(a=>txt(a.name || a.username))
+    .filter(Boolean);
+  return [...new Set(names)].join("، ") || "—";
+}
+
 function filtered(){
   const q=txt($("search").value).toLowerCase();
   const emp=$("employeeFilter").value;
@@ -1046,13 +1128,13 @@ function filtered(){
   const pr=$("priorityFilter").value;
   const dd=$("dateFilter").value;
 
-  return tasks.filter(t=>{
-    if(emp && !normalizeTaskAssignees(t).some(a=>(a.name||a.username)===emp)) return false;
+  return mergeDuplicateTaskRows(tasks).filter(t=>{
+    if(emp && !normalizedSharedAssignees(t).some(a=>(a.name||a.username)===emp)) return false;
     if(st && t.status!==st) return false;
     if(pr && t.priority!==pr) return false;
     if(dd && t.dueDate!==dd) return false;
     if(q){
-      const hay=[assigneeNames(t),t.assignedBy,t.title,t.details,t.adminNote,t.employeeNote].join(" ").toLowerCase();
+      const hay=[mergedAssigneeNames(t),t.assignedBy,t.title,t.details,t.adminNote,t.employeeNote].join(" ").toLowerCase();
       if(!hay.includes(q)) return false;
     }
     return true;
@@ -1125,7 +1207,7 @@ function bindSelectionControls(){
 function render(){
   fillEmployees();
   const list=filtered();
-  $("heroCount").textContent=tasks.length;
+  $("heroCount").textContent=mergeDuplicateTaskRows(tasks).length;
   $("sTotal").textContent=list.length;
   $("sAssigned").textContent=list.filter(t=>deriveGroupStatus(t)==="assigned").length;
   $("sProgress").textContent=list.filter(t=>deriveGroupStatus(t)==="in_progress").length;
@@ -1142,7 +1224,7 @@ function render(){
     <tr class="${selectedIds.has(t.id) ? "row-selected" : ""}">
       <td class="select-col"><input type="checkbox" class="row-select" data-id="${t.id}" ${selectedIds.has(t.id) ? "checked" : ""} aria-label="تحديد السجل للطباعة"></td>
       <td>${i+1}</td>
-      <td><b>${esc(assigneeNames(t))}</b></td>
+      <td><b>${esc(mergedAssigneeNames(t))}</b></td>
       <td><b style="color:#164478">${esc(t.assignedBy||"غير مسجل")}</b></td>
       <td class="task-title">${esc(t.title||"—")} ${isOverdue(t)?'<div class="small" style="color:#c73737">متأخرة</div>':""}</td>
       <td><span class="pill ${priorityClass(t.priority)}">${priorityLabel(t.priority)}</span></td>
@@ -1191,18 +1273,45 @@ function render(){
     </tr>
   `).join("");
 
-  document.querySelectorAll(".editBtn").forEach(b=>b.onclick=()=>openTaskModal(tasks.find(t=>t.id===b.dataset.id)));
-  document.querySelectorAll(".viewBtn").forEach(b=>b.onclick=()=>openView(tasks.find(t=>t.id===b.dataset.id)));
-  document.querySelectorAll(".deleteBtn").forEach(b=>b.onclick=()=>deleteTask(b.dataset.id));
+  document.querySelectorAll(".editBtn").forEach(b=>b.onclick=()=>{
+    const rowTask=filtered().find(x=>x.id===b.dataset.id) || tasks.find(t=>t.id===b.dataset.id);
+    openTaskModal(rowTask);
+  });
+  document.querySelectorAll(".viewBtn").forEach(b=>b.onclick=()=>{
+    const rowTask=filtered().find(x=>x.id===b.dataset.id) || tasks.find(t=>t.id===b.dataset.id);
+    openView(rowTask);
+  });
+  document.querySelectorAll(".deleteBtn").forEach(b=>b.onclick=()=>{
+    const rowTask=filtered().find(x=>x.id===b.dataset.id);
+    if(rowTask && Array.isArray(rowTask._sourceIds) && rowTask._sourceIds.length>1) deleteUnifiedTask(rowTask);
+    else deleteTask(b.dataset.id);
+  });
   bindSelectionControls();
   updateSelectionUI();
+}
+
+
+async function deleteUnifiedTask(task){
+  const ids=Array.isArray(task?._sourceIds) && task._sourceIds.length ? task._sourceIds : [task?.id].filter(Boolean);
+  if(!ids.length) return;
+  if(!confirm(ids.length>1
+    ? `حذف المهمة المشتركة لجميع الموظفين (${ids.length} سجلات قديمة)؟`
+    : "حذف المهمة؟")) return;
+  try{
+    const batch=db.batch();
+    ids.forEach(id=>batch.delete(db.collection(TASKS).doc(id)));
+    await batch.commit();
+  }catch(e){
+    console.error(e);
+    alert("تعذر حذف المهمة.");
+  }
 }
 
 function openView(t){
   if(!t) return;
   $("viewContent").innerHTML=`
     <div class="grid">
-      <div class="field"><label>الموظفون المشتركون</label><div><b>${esc(assigneeNames(t))}</b></div></div>
+      <div class="field"><label>الموظفون المشتركون</label><div><b>${esc(mergedAssigneeNames(t))}</b></div></div>
       <div class="field"><label>المُسند بواسطة</label><div><b>${esc(t.assignedBy||"غير مسجل")}</b></div></div>
       <div class="field full"><label>عنوان المهمة</label><div><b>${esc(t.title||"—")}</b></div></div>
       <div class="field full"><label>التفاصيل</label><div class="note" style="max-width:none">${esc(t.details||"—")}</div></div>
