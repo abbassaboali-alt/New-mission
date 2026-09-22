@@ -490,6 +490,9 @@ function canSeeTask(task){
   ].map(normalizeKey).filter(Boolean));
 
   const taskKeys = [
+    ...(Array.isArray(task?.assignees) ? task.assignees.flatMap(a=>[
+      a?.username,a?.id,a?.name,a?.employeeUsername,a?.employeeUserId,a?.employeeName
+    ]) : []),
     task?.employeeUsername,
     task?.employeeUserId,
     task?.employeeName,
@@ -846,11 +849,7 @@ function openTaskModal(task=null){
   selectedTaskAssignees=[];
 
   if(task){
-    selectedTaskAssignees.push({
-      name:txt(task.employeeName),
-      username:txt(task.employeeUsername),
-      id:txt(task.employeeUserId)
-    });
+    selectedTaskAssignees=normalizeTaskAssignees(task);
   }
 
   $("modalTitle").textContent =
@@ -893,23 +892,91 @@ $("closeModal").onclick=closeTaskModal;
 $("cancelTask").onclick=closeTaskModal;
 $("taskModal").onclick=e=>{if(e.target===$("taskModal"))closeTaskModal();};
 
-function newTaskData(assignee,p,assignedBy){
+
+function safeAssigneeStateKey(a){
+  const raw=txt(a?.username || a?.id || a?.name).toLowerCase();
+  return raw.replace(/[^a-z0-9_\-]/g,"_") || ("user_"+Math.random().toString(36).slice(2,9));
+}
+
+function normalizeTaskAssignees(task){
+  if(Array.isArray(task?.assignees) && task.assignees.length){
+    return task.assignees.map(a=>({
+      name:txt(a?.name || a?.employeeName),
+      username:txt(a?.username || a?.employeeUsername),
+      id:txt(a?.id || a?.employeeUserId)
+    })).filter(a=>a.name || a.username || a.id);
+  }
+  const legacy={
+    name:txt(task?.employeeName),
+    username:txt(task?.employeeUsername),
+    id:txt(task?.employeeUserId)
+  };
+  return (legacy.name || legacy.username || legacy.id) ? [legacy] : [];
+}
+
+function assigneeNames(task){
+  const names=normalizeTaskAssignees(task).map(a=>a.name || a.username).filter(Boolean);
+  return names.length ? names.join("، ") : "—";
+}
+
+function buildAssigneeStates(assignees, oldTask=null){
+  const states={};
+  assignees.forEach(a=>{
+    const key=safeAssigneeStateKey(a);
+    const old=oldTask?.assigneeStates?.[key];
+    states[key]=old || {
+      status:"assigned",
+      employeeNote:"",
+      receivedBy:"",
+      receivedByUsername:"",
+      receivedAt:null,
+      completedAt:null
+    };
+  });
+  return states;
+}
+
+function deriveGroupStatus(task){
+  const assignees=normalizeTaskAssignees(task);
+  if(!assignees.length) return task?.status || "assigned";
+  const states=assignees.map(a=>task?.assigneeStates?.[safeAssigneeStateKey(a)]?.status || task?.status || "assigned");
+  if(states.every(s=>s==="completed")) return "completed";
+  if(states.some(s=>s==="in_progress" || s==="completed")) return "in_progress";
+  if(states.every(s=>s==="cancelled")) return "cancelled";
+  return "assigned";
+}
+
+function newUnifiedTaskData(assignees,p,assignedBy,oldTask=null){
+  const clean=assignees.map(a=>({
+    name:txt(a.name),
+    username:txt(a.username),
+    id:txt(a.id)
+  })).filter(a=>a.name || a.username || a.id);
+
+  const first=clean[0] || {name:"",username:"",id:""};
   return {
-    employeeName:assignee.name,
-    employeeUsername:assignee.username || "",
-    employeeUserId:assignee.id || "",
+    /* الحقول الثلاثة التالية تبقى للتوافق مع الأكواد القديمة */
+    employeeName:first.name,
+    employeeUsername:first.username,
+    employeeUserId:first.id,
+
+    /* المصدر الأساسي الجديد: مهمة واحدة مشتركة */
+    assignees:clean,
+    assigneeNames:clean.map(a=>a.name || a.username).filter(Boolean),
+    assigneeStates:buildAssigneeStates(clean,oldTask),
+
     assignedBy,
     title:p.title,
     details:p.details,
     priority:p.priority,
     dueDate:p.dueDate,
     adminNote:p.adminNote,
-    status:"assigned",
-    employeeNote:"",
-    createdAt:firebase.firestore.FieldValue.serverTimestamp(),
+    status:oldTask ? deriveGroupStatus(oldTask) : "assigned",
+    employeeNote:oldTask?.employeeNote || "",
+    createdAt:oldTask?.createdAt || firebase.firestore.FieldValue.serverTimestamp(),
     updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
-    receivedAt:null,
-    completedAt:null
+    receivedAt:oldTask?.receivedAt || null,
+    completedAt:oldTask?.completedAt || null
   };
 }
 
@@ -935,67 +1002,35 @@ $("saveTask").onclick=async()=>{
 
   try{
     $("saveTask").disabled=true;
-
     const batch=db.batch();
     const assignedBy=getCurrentAssigner();
 
     if(editingId){
-      const oldTask=tasks.find(t=>t.id===editingId) || {};
-      const originalKey=txt(oldTask.employeeUsername || oldTask.employeeUserId || oldTask.employeeName).toLowerCase();
-
-      let originalAssignee=selectedTaskAssignees.find(a=>assigneeKey(a)===originalKey);
-      if(!originalAssignee){
-        originalAssignee={
-          name:txt(oldTask.employeeName),
-          username:txt(oldTask.employeeUsername),
-          id:txt(oldTask.employeeUserId)
-        };
-      }
-
-      /* الصف الأول يعدّل المهمة الأصلية */
+      const oldTask=ALL_TASKS.find(t=>t.id===editingId) || tasks.find(t=>t.id===editingId) || {};
       const first=payloads[0];
-      batch.set(db.collection(TASKS).doc(editingId),{
-        employeeName:originalAssignee.name,
-        employeeUsername:originalAssignee.username || oldTask.employeeUsername || "",
-        employeeUserId:originalAssignee.id || oldTask.employeeUserId || "",
-        assignedBy:oldTask.assignedBy || assignedBy,
-        title:first.title,
-        details:first.details,
-        priority:first.priority,
-        dueDate:first.dueDate,
-        adminNote:first.adminNote,
-        updatedAt:firebase.firestore.FieldValue.serverTimestamp()
-      },{merge:true});
 
-      /* الأشخاص الإضافيون يحصلون على نسخة من المهمة المعدلة */
-      selectedTaskAssignees
-        .filter(a=>assigneeKey(a)!==assigneeKey(originalAssignee))
-        .forEach(a=>{
-          const ref=db.collection(TASKS).doc();
-          batch.set(ref,newTaskData(a,first,assignedBy));
-        });
+      /* المهمة الأصلية تبقى وثيقة واحدة مهما كان عدد الأشخاص */
+      batch.set(
+        db.collection(TASKS).doc(editingId),
+        newUnifiedTaskData(selectedTaskAssignees,first,oldTask.assignedBy || assignedBy,oldTask),
+        {merge:true}
+      );
 
-      /* أي مهام إضافية أثناء التعديل تُنشأ لكل الأشخاص المختارين */
+      /* أي مهمة إضافية أثناء التعديل = وثيقة واحدة مشتركة لنفس الأشخاص */
       payloads.slice(1).forEach(p=>{
-        selectedTaskAssignees.forEach(a=>{
-          const ref=db.collection(TASKS).doc();
-          batch.set(ref,newTaskData(a,p,assignedBy));
-        });
+        const ref=db.collection(TASKS).doc();
+        batch.set(ref,newUnifiedTaskData(selectedTaskAssignees,p,assignedBy));
       });
-
     }else{
-      /* إسناد جديد: كل مهمة لكل شخص مختار */
-      selectedTaskAssignees.forEach(a=>{
-        payloads.forEach(p=>{
-          const ref=db.collection(TASKS).doc();
-          batch.set(ref,newTaskData(a,p,assignedBy));
-        });
+      /* كل صف مهمة = وثيقة واحدة فقط، والأشخاص محفوظون داخل assignees */
+      payloads.forEach(p=>{
+        const ref=db.collection(TASKS).doc();
+        batch.set(ref,newUnifiedTaskData(selectedTaskAssignees,p,assignedBy));
       });
     }
 
     await batch.commit();
     closeTaskModal();
-
   }catch(e){
     console.error(e);
     alert("تعذر حفظ المهام. راجع صلاحيات Firestore.");
@@ -1012,12 +1047,12 @@ function filtered(){
   const dd=$("dateFilter").value;
 
   return tasks.filter(t=>{
-    if(emp && t.employeeName!==emp) return false;
+    if(emp && !normalizeTaskAssignees(t).some(a=>(a.name||a.username)===emp)) return false;
     if(st && t.status!==st) return false;
     if(pr && t.priority!==pr) return false;
     if(dd && t.dueDate!==dd) return false;
     if(q){
-      const hay=[t.employeeName,t.assignedBy,t.title,t.details,t.adminNote,t.employeeNote].join(" ").toLowerCase();
+      const hay=[assigneeNames(t),t.assignedBy,t.title,t.details,t.adminNote,t.employeeNote].join(" ").toLowerCase();
       if(!hay.includes(q)) return false;
     }
     return true;
@@ -1028,8 +1063,10 @@ function fillEmployees(){
   const keep=$("employeeFilter").value;
   const map=new Map();
   tasks.forEach(t=>{
-    const name=txt(t.employeeName);
-    if(name) map.set(name,name);
+    normalizeTaskAssignees(t).forEach(a=>{
+      const name=txt(a.name || a.username);
+      if(name) map.set(name,name);
+    });
   });
   $("employeeFilter").innerHTML='<option value="">كل الموظفين</option>';
   [...map.keys()].sort((a,b)=>a.localeCompare(b,"ar")).forEach(name=>{
@@ -1090,9 +1127,9 @@ function render(){
   const list=filtered();
   $("heroCount").textContent=tasks.length;
   $("sTotal").textContent=list.length;
-  $("sAssigned").textContent=list.filter(t=>t.status==="assigned").length;
-  $("sProgress").textContent=list.filter(t=>t.status==="in_progress").length;
-  $("sCompleted").textContent=list.filter(t=>t.status==="completed").length;
+  $("sAssigned").textContent=list.filter(t=>deriveGroupStatus(t)==="assigned").length;
+  $("sProgress").textContent=list.filter(t=>deriveGroupStatus(t)==="in_progress").length;
+  $("sCompleted").textContent=list.filter(t=>deriveGroupStatus(t)==="completed").length;
   $("sOverdue").textContent=list.filter(isOverdue).length;
   $("statusText").textContent=list.length+" مهمة معروضة";
 
@@ -1105,11 +1142,11 @@ function render(){
     <tr class="${selectedIds.has(t.id) ? "row-selected" : ""}">
       <td class="select-col"><input type="checkbox" class="row-select" data-id="${t.id}" ${selectedIds.has(t.id) ? "checked" : ""} aria-label="تحديد السجل للطباعة"></td>
       <td>${i+1}</td>
-      <td><b>${esc(t.employeeName||"—")}</b></td>
+      <td><b>${esc(assigneeNames(t))}</b></td>
       <td><b style="color:#164478">${esc(t.assignedBy||"غير مسجل")}</b></td>
       <td class="task-title">${esc(t.title||"—")} ${isOverdue(t)?'<div class="small" style="color:#c73737">متأخرة</div>':""}</td>
       <td><span class="pill ${priorityClass(t.priority)}">${priorityLabel(t.priority)}</span></td>
-      <td><span class="pill ${statusClass(t.status)}">${statusLabel(t.status)}</span></td>
+      <td><span class="pill ${statusClass(deriveGroupStatus(t))}">${statusLabel(deriveGroupStatus(t))}</span></td>
       <td class="note">${esc(t.adminNote||"—")}</td>
       <td class="note">${esc(t.employeeNote||"—")}</td>
       <td>${dateTime(t.createdAt)}</td>
@@ -1165,7 +1202,7 @@ function openView(t){
   if(!t) return;
   $("viewContent").innerHTML=`
     <div class="grid">
-      <div class="field"><label>الموظف</label><div>${esc(t.employeeName||"—")}</div></div>
+      <div class="field"><label>الموظفون المشتركون</label><div><b>${esc(assigneeNames(t))}</b></div></div>
       <div class="field"><label>المُسند بواسطة</label><div><b>${esc(t.assignedBy||"غير مسجل")}</b></div></div>
       <div class="field full"><label>عنوان المهمة</label><div><b>${esc(t.title||"—")}</b></div></div>
       <div class="field full"><label>التفاصيل</label><div class="note" style="max-width:none">${esc(t.details||"—")}</div></div>
@@ -1325,9 +1362,9 @@ function printPDF(){
   }
 
   const totals={
-    assigned:list.filter(t=>t.status==="assigned").length,
-    progress:list.filter(t=>t.status==="in_progress").length,
-    completed:list.filter(t=>t.status==="completed").length,
+    assigned:list.filter(t=>deriveGroupStatus(t)==="assigned").length,
+    progress:list.filter(t=>deriveGroupStatus(t)==="in_progress").length,
+    completed:list.filter(t=>deriveGroupStatus(t)==="completed").length,
     overdue:list.filter(isOverdue).length
   };
 
@@ -1357,7 +1394,7 @@ function printPDF(){
         <td>${i+1}</td>
         <td class="task-cell"><b>${esc(t.title||"—")}</b>${txt(t.details)?`<small>${esc(t.details)}</small>`:""}</td>
         <td><span class="pill ${priorityClass(t.priority)}">${priorityLabel(t.priority)}</span></td>
-        <td><span class="pill ${statusClass(t.status)}">${statusLabel(t.status)}</span></td>
+        <td><span class="pill ${statusClass(deriveGroupStatus(t))}">${statusLabel(deriveGroupStatus(t))}</span></td>
         <td class="note-cell">${esc(t.adminNote||"—")}</td>
         <td class="note-cell">${esc(t.employeeNote||"—")}</td>
         <td>${dateOnly(t.dueDate)}</td>
