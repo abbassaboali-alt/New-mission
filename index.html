@@ -175,6 +175,12 @@ tr.row-selected td{
   }
 }
 
+
+@media(max-width:600px){
+  #addAssignee{width:100%}
+  #selectedAssignees{align-items:stretch}
+  #selectedAssignees > span{max-width:100%}
+}
 </style>
 </head>
 
@@ -273,8 +279,15 @@ tr.row-selected td{
     <div class="grid">
       <div class="field full">
         <label>اسم الموظف *</label>
-        <input id="employeeName" list="prudleEmployeesList" placeholder="اختر الموظف أو اكتب الاسم">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="employeeName" list="prudleEmployeesList" placeholder="اختر الموظف أو اكتب الاسم" style="flex:1;min-width:220px">
+          <button type="button" id="addAssignee" class="btn-soft" style="white-space:nowrap">
+            <i class="fa-solid fa-user-plus"></i> إضافة الشخص
+          </button>
+        </div>
         <datalist id="prudleEmployeesList"></datalist>
+        <div id="selectedAssignees" style="display:flex;gap:7px;flex-wrap:wrap;margin-top:9px"></div>
+        <div class="small" style="margin-top:6px">يمكن اختيار أكثر من شخص، وسيتم إسناد نفس المهام للجميع.</div>
       </div>
     </div>
 
@@ -721,7 +734,7 @@ function refreshTaskRowNumbers(){
     const title=row.querySelector(".multi-task-head strong");
     if(title) title.textContent=`المهمة ${i+1}`;
     const del=row.querySelector(".remove-task-row");
-    if(del) del.style.display = rows.length > 1 && !editingId ? "" : "none";
+    if(del) del.style.display = rows.length > 1 ? "" : "none";
   });
 }
 
@@ -742,80 +755,168 @@ function addTaskRow(task={}){
   refreshTaskRowNumbers();
 }
 
+let selectedTaskAssignees = [];
+
+function assigneeKey(a){
+  return txt(a?.username || a?.id || a?.name).toLowerCase();
+}
+
+function normalizeAssigneeFromInput(name){
+  const clean=txt(name);
+  if(!clean) return null;
+  const user=findPrudleUserByEmployeeName(clean);
+  return {
+    name: txt(user ? userTaskDisplayName(user) : clean),
+    username: txt(user?.username),
+    id: txt(user?.id)
+  };
+}
+
+function renderSelectedAssignees(){
+  const box=$("selectedAssignees");
+  if(!box) return;
+
+  if(!selectedTaskAssignees.length){
+    box.innerHTML='<span class="small">لم يتم اختيار أي شخص بعد.</span>';
+    return;
+  }
+
+  box.innerHTML=selectedTaskAssignees.map((a,i)=>`
+    <span style="
+      display:inline-flex;align-items:center;gap:7px;
+      background:#eef5ff;color:#164478;border:1px solid #cfe0f3;
+      border-radius:999px;padding:7px 10px;font-size:12px;font-weight:900">
+      <i class="fa-solid fa-user"></i>
+      ${esc(a.name)}
+      <button type="button" data-remove-assignee="${i}" title="إزالة"
+        style="background:transparent;color:#c73737;padding:0;min-height:auto;border:0">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </span>
+  `).join("");
+
+  box.querySelectorAll("[data-remove-assignee]").forEach(btn=>{
+    btn.onclick=()=>{
+      selectedTaskAssignees.splice(Number(btn.dataset.removeAssignee),1);
+      renderSelectedAssignees();
+    };
+  });
+}
+
+function addCurrentAssignee(){
+  const input=$("employeeName");
+  const a=normalizeAssigneeFromInput(input.value);
+  if(!a || !a.name) return alert("اختر أو اكتب اسم الموظف أولاً.");
+
+  const key=assigneeKey(a);
+  if(!selectedTaskAssignees.some(x=>assigneeKey(x)===key)){
+    selectedTaskAssignees.push(a);
+  }
+  input.value="";
+  renderSelectedAssignees();
+}
+
+function ensureTypedAssigneeAdded(){
+  const value=txt($("employeeName").value);
+  if(value) addCurrentAssignee();
+  return selectedTaskAssignees.length>0;
+}
+
 function openTaskModal(task=null){
 
-  /* إذا كانت عملية تعديل */
   if(task && task.id){
-
-    const currentUser = String(
-      getCurrentAssigner() || ""
-    ).trim().toLowerCase();
-
-    const taskOwner = String(
-      task.assignedBy || ""
-    ).trim().toLowerCase();
+    const currentUser=String(getCurrentAssigner()||"").trim().toLowerCase();
+    const taskOwner=String(task.assignedBy||"").trim().toLowerCase();
 
     if(
-      !currentUser ||
-      !taskOwner ||
-      currentUser === "غير معروف" ||
-      taskOwner === "غير معروف" ||
-      currentUser !== taskOwner
+      !currentUser || !taskOwner ||
+      currentUser==="غير معروف" || taskOwner==="غير معروف" ||
+      currentUser!==taskOwner
     ){
       alert(
         "لا يمكنك تعديل هذه المهمة.\n\n" +
         "يمكن تعديل المهمة فقط بواسطة الشخص الذي قام بإسنادها.\n\n" +
-        "المُسند بواسطة: " +
-        (task.assignedBy || "غير مسجل")
+        "المُسند بواسطة: " + (task.assignedBy || "غير مسجل")
       );
-
       return;
     }
   }
 
-  editingId = task?.id || "";
+  editingId=task?.id || "";
+  selectedTaskAssignees=[];
+
+  if(task){
+    selectedTaskAssignees.push({
+      name:txt(task.employeeName),
+      username:txt(task.employeeUsername),
+      id:txt(task.employeeUserId)
+    });
+  }
 
   $("modalTitle").textContent =
-    editingId
-      ? "تعديل المهمة"
-      : "إسناد أكثر من مهمة";
+    editingId ? "تعديل المهمة وإضافة مهام أو أشخاص" : "إسناد مهام لأكثر من شخص";
 
-  $("employeeName").value =
-    task?.employeeName || "";
+  $("employeeName").value="";
+  $("multiTaskArea").innerHTML="";
 
-  $("multiTaskArea").innerHTML = "";
-
-  $("addAnotherTask").style.display =
-    editingId ? "none" : "";
+  /* يظهر زر إضافة مهمة حتى أثناء التعديل */
+  $("addAnotherTask").style.display="";
 
   $("saveTask").innerHTML =
     editingId
-      ? '<i class="fa-solid fa-floppy-disk"></i> حفظ التعديل'
+      ? '<i class="fa-solid fa-floppy-disk"></i> حفظ التعديل والإضافات'
       : '<i class="fa-solid fa-floppy-disk"></i> حفظ المهام';
 
   addTaskRow(task || {});
-
+  renderSelectedAssignees();
   $("taskModal").classList.add("show");
 }
 
 function closeTaskModal(){
   $("taskModal").classList.remove("show");
   $("multiTaskArea").innerHTML="";
+  $("employeeName").value="";
+  selectedTaskAssignees=[];
   editingId="";
 }
 
 $("addTask").onclick=()=>openTaskModal();
 $("addAnotherTask").onclick=()=>addTaskRow({});
+$("addAssignee").onclick=addCurrentAssignee;
+$("employeeName").addEventListener("keydown",e=>{
+  if(e.key==="Enter"){
+    e.preventDefault();
+    addCurrentAssignee();
+  }
+});
 $("closeModal").onclick=closeTaskModal;
 $("cancelTask").onclick=closeTaskModal;
 $("taskModal").onclick=e=>{if(e.target===$("taskModal"))closeTaskModal();};
 
+function newTaskData(assignee,p,assignedBy){
+  return {
+    employeeName:assignee.name,
+    employeeUsername:assignee.username || "",
+    employeeUserId:assignee.id || "",
+    assignedBy,
+    title:p.title,
+    details:p.details,
+    priority:p.priority,
+    dueDate:p.dueDate,
+    adminNote:p.adminNote,
+    status:"assigned",
+    employeeNote:"",
+    createdAt:firebase.firestore.FieldValue.serverTimestamp(),
+    updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
+    receivedAt:null,
+    completedAt:null
+  };
+}
+
 $("saveTask").onclick=async()=>{
-  const employeeName=txt($("employeeName").value);
-  if(!employeeName) return alert("اكتب اسم الموظف.");
-  const matchedEmployee=findPrudleUserByEmployeeName(employeeName);
-  const employeeUsername=txt(matchedEmployee?.username);
-  const employeeUserId=txt(matchedEmployee?.id);
+  if(!ensureTypedAssigneeAdded()){
+    return alert("أضف شخصاً واحداً على الأقل.");
+  }
 
   const rows=[...document.querySelectorAll("[data-task-row]")];
   if(!rows.length) return alert("أضف مهمة واحدة على الأقل.");
@@ -835,47 +936,66 @@ $("saveTask").onclick=async()=>{
   try{
     $("saveTask").disabled=true;
 
+    const batch=db.batch();
+    const assignedBy=getCurrentAssigner();
+
     if(editingId){
-      const p=payloads[0];
-      const oldTask = tasks.find(t=>t.id===editingId) || {};
-      await db.collection(TASKS).doc(editingId).set({
-        employeeName,
-        employeeUsername: employeeUsername || oldTask.employeeUsername || "",
-        employeeUserId: employeeUserId || oldTask.employeeUserId || "",
-        assignedBy: oldTask.assignedBy || getCurrentAssigner(),
-        title:p.title,
-        details:p.details,
-        priority:p.priority,
-        dueDate:p.dueDate,
-        adminNote:p.adminNote,
+      const oldTask=tasks.find(t=>t.id===editingId) || {};
+      const originalKey=txt(oldTask.employeeUsername || oldTask.employeeUserId || oldTask.employeeName).toLowerCase();
+
+      let originalAssignee=selectedTaskAssignees.find(a=>assigneeKey(a)===originalKey);
+      if(!originalAssignee){
+        originalAssignee={
+          name:txt(oldTask.employeeName),
+          username:txt(oldTask.employeeUsername),
+          id:txt(oldTask.employeeUserId)
+        };
+      }
+
+      /* الصف الأول يعدّل المهمة الأصلية */
+      const first=payloads[0];
+      batch.set(db.collection(TASKS).doc(editingId),{
+        employeeName:originalAssignee.name,
+        employeeUsername:originalAssignee.username || oldTask.employeeUsername || "",
+        employeeUserId:originalAssignee.id || oldTask.employeeUserId || "",
+        assignedBy:oldTask.assignedBy || assignedBy,
+        title:first.title,
+        details:first.details,
+        priority:first.priority,
+        dueDate:first.dueDate,
+        adminNote:first.adminNote,
         updatedAt:firebase.firestore.FieldValue.serverTimestamp()
       },{merge:true});
-    }else{
-      const batch=db.batch();
-      payloads.forEach(p=>{
-        const ref=db.collection(TASKS).doc();
-        batch.set(ref,{
-          employeeName,
-          employeeUsername:employeeUsername || "",
-          employeeUserId:employeeUserId || "",
-          assignedBy:getCurrentAssigner(),
-          title:p.title,
-          details:p.details,
-          priority:p.priority,
-          dueDate:p.dueDate,
-          adminNote:p.adminNote,
-          status:"assigned",
-          employeeNote:"",
-          createdAt:firebase.firestore.FieldValue.serverTimestamp(),
-          updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
-          receivedAt:null,
-          completedAt:null
+
+      /* الأشخاص الإضافيون يحصلون على نسخة من المهمة المعدلة */
+      selectedTaskAssignees
+        .filter(a=>assigneeKey(a)!==assigneeKey(originalAssignee))
+        .forEach(a=>{
+          const ref=db.collection(TASKS).doc();
+          batch.set(ref,newTaskData(a,first,assignedBy));
+        });
+
+      /* أي مهام إضافية أثناء التعديل تُنشأ لكل الأشخاص المختارين */
+      payloads.slice(1).forEach(p=>{
+        selectedTaskAssignees.forEach(a=>{
+          const ref=db.collection(TASKS).doc();
+          batch.set(ref,newTaskData(a,p,assignedBy));
         });
       });
-      await batch.commit();
+
+    }else{
+      /* إسناد جديد: كل مهمة لكل شخص مختار */
+      selectedTaskAssignees.forEach(a=>{
+        payloads.forEach(p=>{
+          const ref=db.collection(TASKS).doc();
+          batch.set(ref,newTaskData(a,p,assignedBy));
+        });
+      });
     }
 
+    await batch.commit();
     closeTaskModal();
+
   }catch(e){
     console.error(e);
     alert("تعذر حفظ المهام. راجع صلاحيات Firestore.");
