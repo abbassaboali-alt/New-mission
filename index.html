@@ -362,6 +362,112 @@ function getCurrentAssigner(){
   ).trim() || "غير معروف";
 }
 
+/* =====================================================
+   TASK VISIBILITY
+   - general_manager يرى جميع المهام
+   - بقية المستخدمين يرون مهامهم فقط
+===================================================== */
+
+function getCurrentUserRoles(){
+  let roles = [];
+
+  try{
+    const savedRoles = JSON.parse(localStorage.getItem("roles") || "[]");
+    if(Array.isArray(savedRoles)){
+      roles = savedRoles
+        .map(role=>String(role || "").trim().toLowerCase())
+        .filter(Boolean);
+    }
+  }catch(error){
+    console.warn("Roles parse error:", error);
+  }
+
+  const oldRole = String(
+    localStorage.getItem("role") ||
+    localStorage.getItem("userRole") ||
+    ""
+  ).trim().toLowerCase();
+
+  if(oldRole && !roles.includes(oldRole)){
+    roles.push(oldRole);
+  }
+
+  return [...new Set(roles)];
+}
+
+function isGeneralManager(){
+  return getCurrentUserRoles().includes("general_manager");
+}
+
+function currentTaskUserKeys(){
+  const username = String(
+    PRUDLE_CURRENT_USER ||
+    sessionStorage.getItem("prudleCurrentUser") ||
+    localStorage.getItem("username") ||
+    localStorage.getItem("userName") ||
+    ""
+  ).trim().toLowerCase();
+
+  const matchedUser = prudleUsers.find(user=>{
+    return [
+      user?.username,
+      user?.userName,
+      user?.usernameLower,
+      user?.taskDisplayName,
+      user?.fullName,
+      user?.trainerName,
+      user?.displayName,
+      user?.name
+    ].some(value=>String(value || "").trim().toLowerCase() === username);
+  });
+
+  return new Set([
+    username,
+    matchedUser?.id,
+    matchedUser?.uid,
+    matchedUser?.username,
+    matchedUser?.userName,
+    matchedUser?.usernameLower,
+    matchedUser?.taskDisplayName,
+    matchedUser?.fullName,
+    matchedUser?.trainerName,
+    matchedUser?.displayName,
+    matchedUser?.name
+  ].map(value=>String(value || "").trim().toLowerCase()).filter(Boolean));
+}
+
+function canCurrentUserSeeTask(task){
+  if(isGeneralManager()) return true;
+
+  const myKeys = currentTaskUserKeys();
+  if(!myKeys.size) return false;
+
+  const taskKeys = [
+    task?.employeeUsername,
+    task?.employeeUserId,
+    task?.employeeName,
+    task?.assignedEmployeeUsername,
+    task?.assignedEmployeeName,
+    task?.assigneeUsername,
+    task?.assigneeName,
+    task?.assignedToUsername,
+    task?.assignedToName,
+    task?.receiverUsername,
+    task?.receiverName,
+    task?.username,
+    task?.userName
+  ].map(value=>String(value || "").trim().toLowerCase()).filter(Boolean);
+
+  return taskKeys.some(key=>myKeys.has(key));
+}
+
+function applyTaskVisibility(list){
+  const source = Array.isArray(list) ? list : [];
+  return isGeneralManager()
+    ? source
+    : source.filter(canCurrentUserSeeTask);
+}
+
 
 /* نطلب اسم المستخدم من الصفحة الرئيسية */
 try{
@@ -1162,13 +1268,13 @@ function printPDF(){
 $("pdfBtn").onclick=printPDF;
 
 db.collection(TASKS).orderBy("createdAt","desc").onSnapshot(snap=>{
-  tasks=snap.docs.map(d=>({id:d.id,...d.data()}));
+  tasks=applyTaskVisibility(snap.docs.map(d=>({id:d.id,...d.data()})));
   render();
 },err=>{
   console.error(err);
   // fallback if orderBy needs an index or older docs have no createdAt
   db.collection(TASKS).onSnapshot(snap=>{
-    tasks=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(toDate(b.createdAt)?.getTime()||0)-(toDate(a.createdAt)?.getTime()||0));
+    tasks=applyTaskVisibility(snap.docs.map(d=>({id:d.id,...d.data()}))).sort((a,b)=>(toDate(b.createdAt)?.getTime()||0)-(toDate(a.createdAt)?.getTime()||0));
     render();
   },e=>{
     console.error(e);
