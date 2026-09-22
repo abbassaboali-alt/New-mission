@@ -1567,45 +1567,71 @@ function printPDF(){
     return alert("حدد سجلًا واحدًا أو أكثر من مربعات الاختيار، أو اضغط «تحديد الكل» ثم PDF.");
   }
 
-  const totals={
-    assigned:list.filter(t=>deriveGroupStatus(t)==="assigned").length,
-    progress:list.filter(t=>deriveGroupStatus(t)==="in_progress").length,
-    completed:list.filter(t=>deriveGroupStatus(t)==="completed").length,
-    overdue:list.filter(isOverdue).length
-  };
-
+  /*
+    التقرير يفصل المهمة المشتركة إلى سجل مستقل داخل قسم كل مستخدم.
+    لا يتم تعديل Firestore هنا؛ هذا فقط لتجهيز بيانات التقرير.
+  */
   const groups=new Map();
-  list.forEach(t=>{
-    const key=txt(t.employeeUsername || t.employeeName || "غير محدد").toLowerCase();
-    if(!groups.has(key)){
-      groups.set(key,{
-        name:txt(t.employeeName)||"غير محدد",
-        username:txt(t.employeeUsername),
-        tasks:[]
+
+  list.forEach(task=>{
+    const members=sharedTaskMemberDetails(task);
+    const effectiveMembers=members.length ? members : [{
+      name:txt(task.employeeName || task.employeeUsername) || "غير محدد",
+      username:txt(task.employeeUsername),
+      status:task.status || "assigned",
+      receivedAt:task.receivedAt || null,
+      completedAt:task.completedAt || null,
+      employeeNote:txt(task.employeeNote)
+    }];
+
+    effectiveMembers.forEach(member=>{
+      const name=txt(member.name)||"غير محدد";
+      const username=txt(member.username);
+      const key=txt(username || name).toLowerCase();
+
+      if(!groups.has(key)){
+        groups.set(key,{name,username,tasks:[]});
+      }
+
+      groups.get(key).tasks.push({
+        ...task,
+        _pdfUserName:name,
+        _pdfUsername:username,
+        _pdfStatus:member.status || task.status || "assigned",
+        _pdfReceivedAt:member.receivedAt || null,
+        _pdfCompletedAt:member.completedAt || null,
+        _pdfEmployeeNote:txt(member.employeeNote)
       });
-    }
-    groups.get(key).tasks.push(t);
+    });
   });
+
+  const allUserRows=[...groups.values()].flatMap(g=>g.tasks);
+  const totals={
+    assigned:allUserRows.filter(t=>t._pdfStatus==="assigned").length,
+    progress:allUserRows.filter(t=>t._pdfStatus==="in_progress").length,
+    completed:allUserRows.filter(t=>t._pdfStatus==="completed").length,
+    overdue:allUserRows.filter(t=>isOverdue(t) && t._pdfStatus!=="completed").length
+  };
 
   const sections=[...groups.values()].map(group=>{
     const gTotals={
-      assigned:group.tasks.filter(t=>t.status==="assigned").length,
-      progress:group.tasks.filter(t=>t.status==="in_progress").length,
-      completed:group.tasks.filter(t=>t.status==="completed").length,
-      overdue:group.tasks.filter(isOverdue).length
+      assigned:group.tasks.filter(t=>t._pdfStatus==="assigned").length,
+      progress:group.tasks.filter(t=>t._pdfStatus==="in_progress").length,
+      completed:group.tasks.filter(t=>t._pdfStatus==="completed").length,
+      overdue:group.tasks.filter(t=>isOverdue(t) && t._pdfStatus!=="completed").length
     };
 
     const rows=group.tasks.map((t,i)=>`
-      <tr class="${isOverdue(t)?"overdue-row":""}">
+      <tr class="${isOverdue(t) && t._pdfStatus!=="completed" ? "overdue-row" : ""}">
         <td>${i+1}</td>
         <td class="task-cell"><b>${esc(t.title||"—")}</b>${txt(t.details)?`<small>${esc(t.details)}</small>`:""}</td>
         <td><span class="pill ${priorityClass(t.priority)}">${priorityLabel(t.priority)}</span></td>
-        <td><span class="pill ${statusClass(deriveGroupStatus(t))}">${statusLabel(deriveGroupStatus(t))}</span></td>
+        <td><span class="pill ${statusClass(t._pdfStatus)}">${statusLabel(t._pdfStatus)}</span></td>
         <td class="note-cell">${esc(t.adminNote||"—")}</td>
-        <td class="note-cell">${esc(t.employeeNote||"—")}</td>
+        <td class="note-cell">${esc(t._pdfEmployeeNote||"—")}</td>
         <td>${dateOnly(t.dueDate)}</td>
-        <td>${dateTime(t.receivedAt)}</td>
-        <td>${dateTime(t.completedAt)}</td>
+        <td>${dateTime(t._pdfReceivedAt)}</td>
+        <td>${dateTime(t._pdfCompletedAt)}</td>
         <td>${esc(t.assignedBy||"غير مسجل")}</td>
       </tr>
     `).join("");
@@ -1619,6 +1645,7 @@ function printPDF(){
           </div>
           <div class="employee-stats">
             <div><span>المهام</span><b>${group.tasks.length}</b></div>
+            <div><span>تم الإسناد</span><b>${gTotals.assigned}</b></div>
             <div><span>قيد الإجراء</span><b>${gTotals.progress}</b></div>
             <div><span>مكتملة</span><b>${gTotals.completed}</b></div>
             <div class="${gTotals.overdue?"danger":""}"><span>متأخرة</span><b>${gTotals.overdue}</b></div>
@@ -1626,8 +1653,8 @@ function printPDF(){
         </div>
         <table>
           <thead><tr>
-            <th>#</th><th class="task-col">المهمة / التفاصيل</th><th>الأولوية</th><th>الحالة</th>
-            <th>ملاحظة الإدارة</th><th>ملاحظة الموظف</th><th>الاستحقاق</th><th>الاستلام</th><th>الإنهاء</th><th>المُسند بواسطة</th>
+            <th>#</th><th class="task-col">المهمة / التفاصيل</th><th>الأولوية</th><th>حالة هذا المستخدم</th>
+            <th>ملاحظة الإدارة</th><th>ملاحظة المستخدم</th><th>الاستحقاق</th><th>استلام المستخدم</th><th>إنهاء المستخدم</th><th>المُسند بواسطة</th>
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>
@@ -1655,16 +1682,16 @@ function printPDF(){
   .employee-section{border:1px solid #d7e3ef;border-radius:12px;overflow:hidden;margin-bottom:15px;break-inside:auto}
   .employee-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 12px;background:linear-gradient(90deg,#edf5ff,#fafcff);border-bottom:2px solid #164478}
   .employee-name{display:flex;align-items:center;gap:9px;min-width:250px}.avatar{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#164478;color:#fff;font-size:19px;font-weight:900}.employee-name span:not(.avatar){font-size:8px;color:#74869a;font-weight:900}.employee-name h2{margin:1px 0;color:#123b68;font-size:17px}.employee-name small{font-size:8px;color:#718096;direction:ltr}
-  .employee-stats{display:grid;grid-template-columns:repeat(4,minmax(68px,1fr));gap:5px}.employee-stats div{background:#fff;border:1px solid #dce6f1;border-radius:8px;padding:5px 8px;text-align:center}.employee-stats span{display:block;font-size:8px;color:#74869a;font-weight:900}.employee-stats b{font-size:14px;color:#164478}.employee-stats .danger{background:#fff0f0;border-color:#efc0c0}.employee-stats .danger b{color:#c73737}
+  .employee-stats{display:grid;grid-template-columns:repeat(5,minmax(62px,1fr));gap:5px}.employee-stats div{background:#fff;border:1px solid #dce6f1;border-radius:8px;padding:5px 8px;text-align:center}.employee-stats span{display:block;font-size:8px;color:#74869a;font-weight:900}.employee-stats b{font-size:14px;color:#164478}.employee-stats .danger{background:#fff0f0;border-color:#efc0c0}.employee-stats .danger b{color:#c73737}
   table{width:100%;border-collapse:collapse;table-layout:fixed}th{background:#164478;color:#fff;border:1px solid #35618e;padding:6px 4px;font-size:8.7px}td{border:1px solid #dce5ee;padding:6px 4px;text-align:center;vertical-align:middle;font-size:8.5px;font-weight:700;line-height:1.45;word-wrap:break-word}tbody tr:nth-child(even) td{background:#f8fbfe}.overdue-row td{background:#fff6f6!important}.task-col{width:20%}.task-cell{text-align:right}.task-cell b{display:block;color:#173d69;font-size:9.5px}.task-cell small{display:block;margin-top:3px;color:#64778b;font-size:8px;font-weight:600;white-space:pre-wrap}.note-cell{text-align:right;white-space:pre-wrap}
   .pill{display:inline-block;min-width:55px;border-radius:99px;padding:4px 5px;font-size:8px;font-weight:900}.p-assigned{background:#eaf3fe;color:#1761a6}.p-progress{background:#fff0d8;color:#9b6500}.p-completed{background:#e7f7ed;color:#168349}.p-cancelled{background:#f1f1f1;color:#69717a}.p-high{background:#fdeaea;color:#c73737}.p-medium{background:#fff4d8;color:#9a6900}.p-low{background:#e7f7ed;color:#168349}
   .footer{margin-top:8px;border-top:1px solid #dce5ee;padding-top:6px;display:flex;justify-content:space-between;font-size:8.5px;color:#6f7d8b;font-weight:800}.print{margin-top:10px;border:0;border-radius:8px;background:#164478;color:#fff;padding:10px 20px;font-weight:bold;cursor:pointer}
   @page{size:A4 landscape;margin:6mm}@media print{body{background:#fff}.page{padding:0;max-width:none}.print{display:none}.header,.employee-head{break-inside:avoid}thead{display:table-header-group}tr{break-inside:avoid}}
   </style></head><body><div class="page">
-  <div class="header"><div class="logo">${logoSrc?`<img src="${logoSrc}">`:""}</div><div class="title"><div class="en">PRUDLE INSTITUTE</div><h1>تقرير متابعة مهام الموظفين</h1><div>Employee Task Follow-up Report</div></div><div class="meta">تاريخ التقرير: ${new Date().toLocaleDateString("ar-SA")}<br>الوقت: ${new Date().toLocaleTimeString("ar-SA")}<br>عدد الموظفين: ${groups.size}<br>عدد المهام: ${list.length}<br>مُصدر التقرير: ${esc(getCurrentAssigner())}</div></div>
-  <div class="summary"><div><span>الموظفون</span><b>${groups.size}</b></div><div><span>إجمالي المهام</span><b>${list.length}</b></div><div><span>تم الإسناد</span><b>${totals.assigned}</b></div><div><span>قيد الإجراء</span><b>${totals.progress}</b></div><div><span>تم الإنهاء</span><b>${totals.completed}</b></div><div class="danger"><span>متأخرة</span><b>${totals.overdue}</b></div></div>
+  <div class="header"><div class="logo">${logoSrc?`<img src="${logoSrc}">`:""}</div><div class="title"><div class="en">PRUDLE INSTITUTE</div><h1>تقرير متابعة مهام الموظفين</h1><div>Employee Task Follow-up Report</div></div><div class="meta">تاريخ التقرير: ${new Date().toLocaleDateString("ar-SA")}<br>الوقت: ${new Date().toLocaleTimeString("ar-SA")}<br>عدد الموظفين: ${groups.size}<br>عدد سجلات المستخدمين: ${allUserRows.length}<br>مُصدر التقرير: ${esc(getCurrentAssigner())}</div></div>
+  <div class="summary"><div><span>الموظفون</span><b>${groups.size}</b></div><div><span>سجلات المستخدمين</span><b>${allUserRows.length}</b></div><div><span>تم الإسناد</span><b>${totals.assigned}</b></div><div><span>قيد الإجراء</span><b>${totals.progress}</b></div><div><span>تم الإنهاء</span><b>${totals.completed}</b></div><div class="danger"><span>متأخرة</span><b>${totals.overdue}</b></div></div>
   ${sections}
-  <div class="footer"><span>Prudle Institute</span><span>تقرير إداري داخلي – نظام إسناد المهام</span></div>
+  <div class="footer"><span>Prudle Institute</span><span>تقرير إداري داخلي – تفاصيل مستقلة لكل مستخدم</span></div>
   <button class="print" onclick="window.print()">طباعة / حفظ PDF</button>
   </div></body></html>`);
   w.document.close();
