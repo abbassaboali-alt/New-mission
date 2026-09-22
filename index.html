@@ -181,6 +181,22 @@ tr.row-selected td{
   #selectedAssignees{align-items:stretch}
   #selectedAssignees > span{max-width:100%}
 }
+
+/* ===== تفاصيل حالة المهمة المشتركة ===== */
+.shared-status-btn{
+  background:#eef5ff;color:#164478;border:1px solid #cfe0f3;
+  padding:7px 12px;border-radius:10px;font-size:11px;font-weight:900;white-space:nowrap
+}
+.shared-status-btn:hover{background:#dfeeff}
+.member-status-list{display:grid;gap:10px;margin-top:12px}
+.member-status-row{
+  display:grid;grid-template-columns:minmax(130px,1.2fr) minmax(110px,.8fr) minmax(150px,1fr) minmax(150px,1fr);
+  gap:10px;align-items:center;padding:12px;border:1px solid #e1e9f2;border-radius:13px;background:#f9fbfe
+}
+.member-status-name{font-weight:900;color:#164478}
+.member-status-meta{font-size:11px;color:#65778d;line-height:1.6}
+@media(max-width:700px){.member-status-row{grid-template-columns:1fr}.member-status-row>div{padding-bottom:3px}}
+
 </style>
 </head>
 
@@ -313,6 +329,16 @@ tr.row-selected td{
       <button id="closeView" class="btn-gray">إغلاق</button>
     </div>
     <div id="viewContent"></div>
+  </div>
+</div>
+
+<div class="modal" id="sharedStatusModal">
+  <div class="modal-card" style="width:min(900px,100%)">
+    <div class="modal-head">
+      <h3><i class="fa-solid fa-users-viewfinder"></i> حالة المستخدمين في المهمة</h3>
+      <button id="closeSharedStatus" class="btn-gray">إغلاق</button>
+    </div>
+    <div id="sharedStatusContent"></div>
   </div>
 </div>
 
@@ -1084,6 +1110,7 @@ function mergeDuplicateTaskRows(list){
       groups.set(key,{
         ...t,
         _sourceIds:[t.id],
+        _memberTasks:[t],
         assignees:normalizedSharedAssignees(t)
       });
       return;
@@ -1091,6 +1118,8 @@ function mergeDuplicateTaskRows(list){
 
     const g=groups.get(key);
     g._sourceIds.push(t.id);
+    if(!Array.isArray(g._memberTasks)) g._memberTasks=[];
+    g._memberTasks.push(t);
 
     const seen=new Set(g.assignees.map(a=>
       txt(a.username || a.id || a.name).toLowerCase()
@@ -1204,6 +1233,65 @@ function bindSelectionControls(){
   }
 }
 
+function sharedTaskMemberDetails(task){
+  const assignees=normalizedSharedAssignees(task);
+
+  /* السجلات القديمة المدمجة: كل موظف له مستند مستقل */
+  if(Array.isArray(task?._memberTasks) && task._memberTasks.length>1){
+    return task._memberTasks.map(m=>({
+      name:txt(m.employeeName || m.employeeUsername) || "—",
+      username:txt(m.employeeUsername),
+      status:m.status || "assigned",
+      receivedAt:m.receivedAt || null,
+      completedAt:m.completedAt || null,
+      employeeNote:txt(m.employeeNote)
+    }));
+  }
+
+  /* النظام الجديد: مستند واحد وحالة مستقلة لكل مستخدم */
+  return assignees.map(a=>{
+    const key=safeAssigneeStateKey(a);
+    const s=(task?.assigneeStates && task.assigneeStates[key]) || {};
+    return {
+      name:txt(a.name || a.username) || "—",
+      username:txt(a.username),
+      status:s.status || task.status || "assigned",
+      receivedAt:s.receivedAt || null,
+      completedAt:s.completedAt || null,
+      employeeNote:txt(s.employeeNote)
+    };
+  });
+}
+
+function isSharedTask(task){
+  return sharedTaskMemberDetails(task).length>1;
+}
+
+function openSharedStatus(task){
+  if(!task) return;
+  const members=sharedTaskMemberDetails(task);
+  $("sharedStatusContent").innerHTML=`
+    <div style="padding:4px 2px 8px">
+      <div style="font-weight:900;color:#173d69;font-size:16px">${esc(task.title||"—")}</div>
+      <div class="small" style="margin-top:5px">${members.length} مستخدمين مشتركون في هذه المهمة</div>
+    </div>
+    <div class="member-status-list">
+      ${members.map(m=>`
+        <div class="member-status-row">
+          <div>
+            <div class="member-status-name"><i class="fa-solid fa-user"></i> ${esc(m.name)}</div>
+            ${m.username && m.username.toLowerCase()!==m.name.toLowerCase()?`<div class="member-status-meta">${esc(m.username)}</div>`:""}
+          </div>
+          <div><span class="pill ${statusClass(m.status)}">${statusLabel(m.status)}</span></div>
+          <div class="member-status-meta"><b>تم الاستلام</b><br>${dateTime(m.receivedAt)}</div>
+          <div class="member-status-meta"><b>تم الإنهاء</b><br>${dateTime(m.completedAt)}</div>
+          ${m.employeeNote?`<div class="member-status-meta" style="grid-column:1/-1"><b>ملاحظة الموظف:</b> ${esc(m.employeeNote)}</div>`:""}
+        </div>
+      `).join("")}
+    </div>`;
+  $("sharedStatusModal").classList.add("show");
+}
+
 function render(){
   fillEmployees();
   const list=filtered();
@@ -1228,7 +1316,10 @@ function render(){
       <td><b style="color:#164478">${esc(t.assignedBy||"غير مسجل")}</b></td>
       <td class="task-title">${esc(t.title||"—")} ${isOverdue(t)?'<div class="small" style="color:#c73737">متأخرة</div>':""}</td>
       <td><span class="pill ${priorityClass(t.priority)}">${priorityLabel(t.priority)}</span></td>
-      <td><span class="pill ${statusClass(deriveGroupStatus(t))}">${statusLabel(deriveGroupStatus(t))}</span></td>
+      <td>${isSharedTask(t)
+        ? `<button type="button" class="shared-status-btn sharedStatusBtn" data-id="${t.id}"><i class="fa-solid fa-list-check"></i> التفاصيل</button>`
+        : `<span class="pill ${statusClass(deriveGroupStatus(t))}">${statusLabel(deriveGroupStatus(t))}</span>`
+      }</td>
       <td class="note">${esc(t.adminNote||"—")}</td>
       <td class="note">${esc(t.employeeNote||"—")}</td>
       <td>${dateTime(t.createdAt)}</td>
@@ -1281,6 +1372,10 @@ function render(){
     const rowTask=filtered().find(x=>x.id===b.dataset.id) || tasks.find(t=>t.id===b.dataset.id);
     openView(rowTask);
   });
+  document.querySelectorAll(".sharedStatusBtn").forEach(b=>b.onclick=()=>{
+    const rowTask=filtered().find(x=>x.id===b.dataset.id) || tasks.find(t=>t.id===b.dataset.id);
+    openSharedStatus(rowTask);
+  });
   document.querySelectorAll(".deleteBtn").forEach(b=>b.onclick=()=>{
     const rowTask=filtered().find(x=>x.id===b.dataset.id);
     if(rowTask && Array.isArray(rowTask._sourceIds) && rowTask._sourceIds.length>1) deleteUnifiedTask(rowTask);
@@ -1328,6 +1423,8 @@ function openView(t){
 }
 $("closeView").onclick=()=>$("viewModal").classList.remove("show");
 $("viewModal").onclick=e=>{if(e.target===$("viewModal"))$("viewModal").classList.remove("show");};
+$("closeSharedStatus").onclick=()=>$("sharedStatusModal").classList.remove("show");
+$("sharedStatusModal").onclick=e=>{if(e.target===$("sharedStatusModal"))$("sharedStatusModal").classList.remove("show");};
 
 async function deleteTask(id){
 
